@@ -29,8 +29,6 @@ import time
 
 from collections import defaultdict
 
-start_dir = os.path.abspath(os.path.curdir)
-
 
 def get_root_paths(start_path: str) -> list:
     """Walk paths to discover roots"""
@@ -80,14 +78,14 @@ def get_tf_files(path: str) -> list:
     return [x for x in files if x.endswith(".tf")]
 
 
-def build_dependency_dict(roots: list) -> dict:
+def build_dependency_dict(roots: list, start_dir: str) -> dict:
     """Build a flat dict of dependency relationships for tf roots.
     Returns a dict where the key is every module and the
     value is the set of modules or roots that depend on it.
     """
     # map of modules and their direct dependents
     dependents = defaultdict(set)
-
+    os.chdir(start_dir)
     @functools.lru_cache()
     def find_deps_for_dir(tf_dir: str) -> None:
 
@@ -117,12 +115,13 @@ def find_mods_affected(subject: str, modules: set, deps_dict: dict) -> set:
 
 
 def main():
+    start_dir: str = os.path.abspath(os.path.curdir)
     root_path: str = sys.argv[1]
     mods: list = sys.argv[2:]
     roots = get_root_paths(root_path)
     print(f"scanning {len(roots)} roots...")
     start = time.time()
-    dependents = build_dependency_dict(roots)
+    dependents = build_dependency_dict(roots, start_dir)
     elapsed: int = int(time.time() - start)
     print(f"Built dependency map for {len(roots)} roots in {elapsed}s")
 
