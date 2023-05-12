@@ -17,7 +17,7 @@ terraform_deps.py [ROOTS_PATH] [MODULE_PATH ...]
 It will find the roots in ROOT_PATH and scan the .tf files for
 module source declarations and follow the relative path for those
 to find the tree of dependencies. A flat dictionary is built.
-Then it will scan the dictionary for each module you reference to 
+Then it will scan the dictionary for each module you reference to
 tell you what you seek: which roots are dependent on this module.
 """
 
@@ -29,6 +29,7 @@ import time
 
 from collections import defaultdict
 
+import hcl2
 
 def get_root_paths(start_path: str) -> list:
     """Walk paths to discover roots"""
@@ -51,25 +52,32 @@ def get_root_paths(start_path: str) -> list:
 def file_has_backend(path: str) -> bool:
     with open(path) as f:
         data = f.read()
-        if re.search(r"backend +\"", data) or re.search(r"cloud +\{", data) :
+        if re.search(r"backend +\"", data) or re.search(r"cloud +\{", data):
             return True
         else:
             return False
 
-
 def extract_sources(path: str) -> list:
     """Find/extract module sources for a tf file.
-    This is 10x faster than using hcl2
+        hcl2 is a bit slow, tbh. regexp would be way faster
+        but not sure it can be done reliably
+        e.g. this makes the wrong assumption that source is on the next
+        line after module {
+        matches = re.findall(r"module +\"\S+\" +\{\s+source += +\"(\S+)\"", data, flags=re.DOTALL)
+        for item in matches:
+            sources.append(item)
     """
     sources = []
     with open(path) as f:
         data = f.read()
-        if "source " in data and "module ":
-            matches = re.findall(r"module +\"\S+\" +\{\s+source += +\"(\S+)\"", data, flags=re.DOTALL)
-            for item in matches:
-                sources.append(item)
+        # only deserialize if we need to (3x faster)
+        if "source " in data:
+            tf_dict = hcl2.loads(data)
+            for m in tf_dict.get('module', []):
+                for _, module_dict in m.items():
+                    source: str = module_dict.get('source')
+                    sources.append(source)
     return sources
-
 
 def get_tf_files(path: str) -> list:
     if not os.path.isdir(path):
@@ -86,6 +94,7 @@ def build_dependency_dict(roots: list, start_dir: str) -> dict:
     # map of modules and their direct dependents
     dependents = defaultdict(set)
     os.chdir(start_dir)
+
     @functools.lru_cache()
     def find_deps_for_dir(tf_dir: str) -> None:
 
@@ -109,8 +118,8 @@ def build_dependency_dict(roots: list, start_dir: str) -> dict:
 def find_mods_affected(subject: str, modules: set, deps_dict: dict) -> set:
     """Find dependent modules for a given modules"""
     for dep in deps_dict.get(subject, []):
-            modules.add(dep)
-            modules = find_mods_affected(dep, modules, deps_dict)
+        modules.add(dep)
+        modules = find_mods_affected(dep, modules, deps_dict)
     return modules
 
 
@@ -124,15 +133,14 @@ def main():
     dependents = build_dependency_dict(roots, start_dir)
     elapsed: int = int(time.time() - start)
     print(f"Built dependency map for {len(roots)} roots in {elapsed}s")
-
     print()
     for mod in mods:
         print(f"recursive scan to find those dependent on: {mod}...")
-        dmods: list = (find_mods_affected(mod, set(), dependents))
+        dmods: list = find_mods_affected(mod, set(), dependents)
         for dmod in sorted(dmods):
             print(dmod)
         print()
 
+
 if __name__ == "__main__":
     main()
-
